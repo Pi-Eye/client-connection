@@ -7,7 +7,6 @@
   "scripts": {
     "lint": "eslint ./**/*.ts",
     "build": "tsc -b",
-
     "pretest": "npm run build",
     "test": "mocha ./lib/**/*.test.js",
     "coverage": "nyc npm test"

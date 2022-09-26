@@ -1,5 +1,5 @@
 import WebClient from "./client";
 import ServerSide from "./server";
-import { } from "./types";
+import { ServerSideEvents } from "./types";
 
-export { WebClient, ServerSide }; 
+export { WebClient, ServerSide, ServerSideEvents }; 
