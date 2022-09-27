@@ -1,3 +1,4 @@
 import WebClient from "./client";
 import ServerSide from "./server";
-export { WebClient, ServerSide };
+import { ServerSideEvents } from "./types";
+export { WebClient, ServerSide, ServerSideEvents };
