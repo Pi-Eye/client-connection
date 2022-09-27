@@ -19,14 +19,14 @@ export type ServerMsg = {
   id: number;
   timestamp: number;
   type: ServerMsgType;
-  msg: Buffer;
+  msg: Uint8Array;
 }
 
 export type ServerParsedMsg = {
   id: number;
   timestamp: number;
   type: ServerMsgType;
-  msg: Buffer;
+  msg: Uint8Array;
 }
 
 export type ServerSideEvents = {

@@ -17,13 +17,13 @@ export declare type ServerMsg = {
     id: number;
     timestamp: number;
     type: ServerMsgType;
-    msg: Buffer;
+    msg: Uint8Array;
 };
 export declare type ServerParsedMsg = {
     id: number;
     timestamp: number;
     type: ServerMsgType;
-    msg: Buffer;
+    msg: Uint8Array;
 };
 export declare type ServerSideEvents = {
     ready: () => void;

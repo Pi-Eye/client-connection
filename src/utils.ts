@@ -79,7 +79,7 @@ export function ParseClientMsgType(msg: Buffer): ClientParsedMsg {
  * @returns type of message
  */
 export function ParseServerMsgType(m: ArrayBuffer): ServerParsedMsg {
-  const msg: Buffer = Buffer.from(m);
+  const msg: Buffer = Buffer.from(m, 0, 1 + 4 + 8);
   const id = msg.readUInt32BE(ID_OFFSET);
   switch (msg.readUint8(0)) {
     case (ServerMsgType.auth0): {
@@ -87,14 +87,14 @@ export function ParseServerMsgType(m: ArrayBuffer): ServerParsedMsg {
         id,
         timestamp: Number(msg.readBigInt64BE(TIMESTAMP_OFFSET)),
         type: ServerMsgType.auth0,
-        msg: msg.subarray(MSG_OFFSET)
+        msg: new Uint8Array(m, 1 + 4 + 8)
       };
     } case (ServerMsgType.auth1): {
       return {
         id,
         timestamp: Number(msg.readBigInt64BE(TIMESTAMP_OFFSET)),
         type: ServerMsgType.auth1,
-        msg: msg.subarray(MSG_OFFSET)
+        msg: new Uint8Array(m, 1 + 4 + 8)
       };
     }
     case (ServerMsgType.frame): {
@@ -102,7 +102,7 @@ export function ParseServerMsgType(m: ArrayBuffer): ServerParsedMsg {
         id,
         timestamp: Number(msg.readBigInt64BE(TIMESTAMP_OFFSET)),
         type: ServerMsgType.frame,
-        msg: msg.subarray(MSG_OFFSET)
+        msg: new Uint8Array(m, 1 + 4 + 8)
       };
     }
     default: {
@@ -110,7 +110,7 @@ export function ParseServerMsgType(m: ArrayBuffer): ServerParsedMsg {
         id,
         timestamp: 0,
         type: ServerMsgType.unknown,
-        msg: msg.subarray(MSG_OFFSET)
+        msg: new Uint8Array(m, 1 + 4 + 8)
       };
     }
   }
@@ -139,7 +139,7 @@ export function AesEncrypt(data: Buffer, key: Buffer): Buffer {
  * @param key buffer of key to decrypt data
  * @returns buffer of unencrypted data
  */
-export function AesDecrypt(encrypted: Buffer, key: Buffer): Buffer {
+export function AesDecrypt(encrypted: Uint8Array, key: Buffer): Buffer {
   const iv = encrypted.subarray(0, IV_LENGTH);
   const authTag = encrypted.subarray(IV_LENGTH, IV_LENGTH + AUTH_TAG_LENGTH);
   const data = encrypted.subarray(IV_LENGTH + AUTH_TAG_LENGTH, encrypted.length);

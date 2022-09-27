@@ -26,4 +26,4 @@ export declare function AesEncrypt(data: Buffer, key: Buffer): Buffer;
  * @param key buffer of key to decrypt data
  * @returns buffer of unencrypted data
  */
-export declare function AesDecrypt(encrypted: Buffer, key: Buffer): Buffer;
+export declare function AesDecrypt(encrypted: Uint8Array, key: Buffer): Buffer;
