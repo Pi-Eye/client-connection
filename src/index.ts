@@ -1,5 +1,9 @@
+import path from "path";
+
 import WebClient from "./client";
 import ServerSide from "./server";
 import { ServerSideEvents } from "./types";
 
-export { WebClient, ServerSide, ServerSideEvents }; 
+const ClientBundlePath = path.join(__dirname, "bundle.js");
+
+export { WebClient, ServerSide, ServerSideEvents, ClientBundlePath }; 

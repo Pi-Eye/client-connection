@@ -1,4 +1,5 @@
 import WebClient from "./client";
 import ServerSide from "./server";
 import { ServerSideEvents } from "./types";
-export { WebClient, ServerSide, ServerSideEvents };
+declare const ClientBundlePath: string;
+export { WebClient, ServerSide, ServerSideEvents, ClientBundlePath };
