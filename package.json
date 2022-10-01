@@ -1,52 +1,36 @@
 {
-  "name": "client-connection",
+  "name": "client-connection-server",
   "version": "1.0.0",
-  "description": "Package for connecting with Pi-Eye server",
-  "main": "./lib/src/index.js",
-  "types": "./lib/src/index.d.ts",
+  "description": "Server side code for connecting with Pi-Eye server",
+  "main": "./lib/server.js",
+  "types": "./lib/server.d.ts",
   "files": [
     "lib"
   ],
   "scripts": {
     "lint": "eslint ./**/*.ts",
-    "build": "tsc -b",
-    "pretest": "npm run build",
-    "test": "mocha ./lib/**/*.test.js",
-    "coverage": "nyc npm test"
+    "build": "tsc -b"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Pi-Eye/client-connection.git"
+    "url": "git+https://github.com/Pi-Eye/client-connection-server.git"
   },
   "author": "Bwu1324",
   "license": "GPL-3.0",
   "bugs": {
-    "url": "https://github.com/Pi-Eye/client-connection/issues"
+    "url": "https://github.com/Pi-Eye/client-connection-server/issues"
   },
-  "homepage": "https://github.com/Pi-Eye/client-connection#readme",
+  "homepage": "https://github.com/Pi-Eye/client-connection-server#readme",
   "devDependencies": {
-    "@istanbuljs/nyc-config-typescript": "^1.0.2",
-    "@types/crypto-js": "^4.1.1",
     "@typescript-eslint/eslint-plugin": "^5.42.0",
-    "chai": "^4.3.6",
-    "cmake-js": "^7.0.0",
-    "eslint": "^8.27.0",
-    "esmify": "^2.1.1",
-    "mocha": "^10.1.0",
-    "nyc": "^15.1.0"
+    "eslint": "^8.27.0"
   },
   "dependencies": {
-    "@types/chai": "^4.3.3",
-    "@types/mocha": "^10.0.0",
     "@types/node": "^18.11.9",
     "@types/ws": "^8.5.3",
     "argon2": "^0.30.2",
-    "buffer": "^6.0.3",
     "camera-interface": "github:Pi-Eye/camera-interface",
-    "events": "^3.3.0",
-    "isomorphic-ws": "^5.0.0",
     "node-stream-processor-types": "github:Pi-Eye/node-stream-processor-types",
-    "typed-emitter": "^2.1.0",
     "typescript": "^4.8.4",
     "ws": "^8.11.0"
   },

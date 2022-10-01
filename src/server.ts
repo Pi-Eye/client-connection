@@ -1,14 +1,10 @@
-import WebSocket from "ws";
+import WebSocket, { AddressInfo } from "ws";
 import crypto from "crypto";
 import { IncomingMessage } from "http";
-import { AllSettings } from "camera-interface";
-import EventEmitter from "events";
-import TypedEventEmitter from "typed-emitter";
 
 import { ClientMsgType, ServerMsgType } from "./enums";
-import { ClientMsg, ServerMsg, ServerSideEvents } from "./types";
+import { ClientParsedMsg, ServerMsg } from "./types";
 import * as utils from "./utils";
-import { AddressInfo } from "net";
 
 /**
  * Congestion control behavior intended to implement ideas found in V. Jacobson's 1988 Paper "Congestion Avoidance and Control"
@@ -20,81 +16,84 @@ const MAX_QUEUE_LENGTH = parseInt(process.env.MAX_QUEUE_LENGTH) || 30;    // Nmm
 const RTT_GAIN = parseFloat(process.env.RTT_GAIN) || 0.125;               // "gain", 0 < gain < 1 for estimating average RTT, see paper
 const DEV_GAIN = parseFloat(process.env.DEV_GAIN) || 0.25;                // "gain", 0 < gain < 1 for estimating mean deviation, see paper
 
+type SocketProperties = {
+  id: number;
+  address: string;
+  ack_timeout: NodeJS.Timeout;
+  rtt_avg: number;
+  mean_dev: number;
+  rto_interval: number;
+  last_send_window_count: number;
+  rto_timeout: NodeJS.Timeout;
+  connected: boolean;
+  sockets_wanted: {
+    [key: string]: number
+  },
+  ecdh: crypto.ECDH;
+  keys: Buffer;
+  secret: Buffer;
+  last_id: number;
+  inflight: Array<number>;  // timestamps of sent frames
+  send_queue: Array<Buffer>;
+  socket: WebSocket.WebSocket;
+};
+
 export default class ServerSide {
-  private events_ = new EventEmitter() as TypedEventEmitter<ServerSideEvents>;
-  get events() { return this.events_; }
-
-  private ack_timeout_: NodeJS.Timeout;
-
   private server_: WebSocket.Server;
-  private socket_: WebSocket.WebSocket;
+  private sockets_: Array<SocketProperties> = [];
 
-  private all_settings_: AllSettings;
+  private next_id_ = 0;
 
-  private ecdh_: crypto.ECDH;
-  private secret_: Buffer;
   private auth_function_: (cookie: string) => boolean;
-  private authenticated_ = false;
-
-  private last_id_ = 0;
-  private inflight_: Array<{ id: number, timestamp: number }> = [];
-
-  private send_queue_: Array<Buffer> = [];
-
-  private rtt_avg_: number;
-  private mean_dev_: number;
-  private rto_interval_: number;
-  private last_send_window_count_: number;
-  private rto_timeout_: NodeJS.Timeout;
 
   private port_: number;
 
-  constructor(port: number, all_settings: AllSettings, auth_function: (cookie: string) => boolean) {
+  constructor(port: number, auth_function: (cookie: string) => boolean) {
     this.port_ = port; this.CreateServer();
-    this.all_settings_ = all_settings;
     this.auth_function_ = auth_function;
   }
 
   /**
    * QueueFrame() - Queues up a frame to be sent
    * @param frame frame to queue
+   * @param timestamp timestamp of frame
+   * @param motion motion on frame or not
+   * @param address address of camera
    */
-  QueueFrame(frame: Buffer, timestamp: number, motion: boolean) {
-    if (!this.authenticated_) return;
-
+  QueueFrame(frame: Buffer, timestamp: number, motion: boolean, address: string) {
     const motion_int = (motion) ? 1 : 0;
-    const header = Buffer.alloc(1 + 8);
-    header.writeUint8(motion_int, 0);
-    header.writeBigInt64BE(BigInt(timestamp), 1);
+    const header = Buffer.alloc(1 + 1 + 8);
+    header.writeUint8(motion_int, 1);
+    header.writeBigInt64BE(BigInt(timestamp), 2);
 
-    if (this.send_queue_.length == MAX_QUEUE_LENGTH) {
-      console.warn("Queue full, dropping frames");
-      this.HalveQueue();
+    for (let i = 0; i < this.sockets_.length; i++) {
+      const socket_props = this.sockets_[i];
+      if (socket_props.sockets_wanted[address] === undefined) { continue; }
+
+      header.writeUint8(socket_props.sockets_wanted[address], 0);
+      if (socket_props.send_queue.length == MAX_QUEUE_LENGTH) {
+        console.warn("Queue full, dropping frames");
+        this.HalveQueue(socket_props);
+      }
+
+      let encrypted;
+      try {
+        encrypted = utils.AesEncrypt(Buffer.concat([header, frame]), socket_props.secret);
+      } catch (error) {
+        console.warn(`Error while encrypting frame, terminating connection. Error: ${error}`);
+        socket_props.socket.close();
+        return;
+      }
+
+      socket_props.send_queue.push(encrypted);
     }
-
-    let encrypted;
-    try {
-      encrypted = utils.AesEncrypt(Buffer.concat([header, frame]), this.secret_);
-    } catch (error) {
-      console.warn(`Error while encrypting frame, terminating connection. Error: ${error}`);
-      this.socket_.terminate();
-      return;
-    }
-
-    this.send_queue_.push(encrypted);
   }
 
   /**
    * Stop() - Fully stops websocket server
    */
   Stop() {
-    clearTimeout(this.ack_timeout_);
-    clearTimeout(this.rto_timeout_);
-    this.authenticated_ = false;
-    this.send_queue_ = [];
-    this.server_.clients.forEach((socket) => {
-      socket.close();
-    });
+    this.server_.clients.forEach((socket) => { socket.close(); });
     this.server_.close();
   }
 
@@ -102,7 +101,6 @@ export default class ServerSide {
    * CreateServer() - Creates websocket server
    */
   private CreateServer() {
-    this.authenticated_ = false;
     this.server_ = new WebSocket.Server({ port: this.port_ });
 
     this.server_.on("connection", (socket, request) => {
@@ -131,113 +129,76 @@ export default class ServerSide {
    * AckHandler() - Handles acknowledgement of recieved data
    * @param ack acknowledgement message
    */
-  private AckHandler(ack: ClientMsg) {
-    clearInterval(this.ack_timeout_);
-    this.ack_timeout_ = setTimeout(() => {
-      console.warn("Did not recieve acknowledgements for 10 seconds, terminating connection");
-      try { this.socket_.terminate(); } catch { /* */ }
+  private AckHandler(ack: ClientParsedMsg, socket_props: SocketProperties) {
+    clearInterval(socket_props.ack_timeout);
+    socket_props.ack_timeout = setTimeout(() => {
+      console.warn(`Did not recieve acknowledgements for 10 seconds, terminating connection with ${socket_props.address}`);
+      try { socket_props.socket.close(); } catch { /* */ }
     }, 10000);
 
-    if (this.inflight_[0].id == ack.id) {
-      const sent = this.inflight_.shift();
-      const rtt = Date.now() - sent.timestamp;
+    const sent_time = socket_props.inflight.shift();
+    const rtt = Date.now() - sent_time;
 
-      // Calculate next rto_interval
-      const err = rtt - this.rtt_avg_;
-      this.rtt_avg_ = this.rtt_avg_ + RTT_GAIN * err;
-      this.mean_dev_ = this.mean_dev_ + DEV_GAIN * (Math.abs(err) - this.mean_dev_);
+    // Calculate next rto_interval
+    const err = rtt - socket_props.rtt_avg;
+    socket_props.rtt_avg = socket_props.rtt_avg + RTT_GAIN * err;
+    socket_props.mean_dev = socket_props.mean_dev + DEV_GAIN * (Math.abs(err) - socket_props.mean_dev);
 
-      this.rto_interval_ = this.rtt_avg_ + this.mean_dev_;
+    socket_props.rto_interval = socket_props.rtt_avg + socket_props.mean_dev;
 
-      if (this.inflight_.length == 0) { this.SendWindow(this.last_send_window_count_ + 1); }
-    }
+    if (socket_props.inflight.length == 0) { this.SendWindow(socket_props, socket_props.last_send_window_count + 1); }
   }
 
   /**
    * Auth0Handler() - Handles responding to auth0 message
    * @param auth0 auth0 message
-   * @param socket websocket
-   * @param address address of websocket
+   * @param socket_props websocket properties
    */
-  private async Auth0Handler(auth0: ClientMsg, socket: WebSocket, address: string) {
+  private async Auth0Handler(auth0: ClientParsedMsg, socket_props: SocketProperties) {
     try {
-      this.secret_ = this.ecdh_.computeSecret(auth0.msg).subarray(0, 16);
+      const key = socket_props.ecdh.computeSecret(auth0.msg);
+      socket_props.secret = crypto.createHash("sha256").update(key).digest().subarray(0, 16);
     }
     catch (error) {
-      console.warn(`Failed to compute secret key, terminating connection with $${address}. Error: ${error}`);
+      console.warn(`Failed to compute secret key, terminating connection with ${socket_props.address}. Error: ${error}`);
+      socket_props.socket.close();
     }
   }
 
   /**
    * Auth1Handler() - Handles responding to auth1 message
    * @param auth1 auth1 message
-   * @param socket websocket
-   * @param address address of websocket
+   * @param socket_props websocket properties
    */
-  private async Auth1Handler(auth1: ClientMsg, socket: WebSocket, address: string) {
+  private async Auth1Handler(auth1: ClientParsedMsg, socket_props: SocketProperties) {
     // Parse out cookie
-    let cookie;
+    let auth1_info;
+    utils.AesDecrypt(auth1.msg, socket_props.secret);
     try {
-      cookie = utils.AesDecrypt(auth1.msg, this.secret_).toString("utf-8");
+      auth1_info = JSON.parse(utils.AesDecrypt(auth1.msg, socket_props.secret).toString("utf-8"));
+      
     } catch (error) {
-      console.warn(`Failed to decrypt cookie, terminating connection with ${address}. Error: ${error}`);
-      socket.close();
+      console.warn(`Failed to decrypt cookie, terminating connection with ${socket_props.address}. Error: ${error}`);
+      socket_props.socket.close();
       return;
     }
 
     // Verify 
-    if (!this.auth_function_(cookie)) {
-      console.warn(`Incorrect cookie recieved, terminating connection with ${address}`);
-      socket.close();
+    if (!this.auth_function_(auth1_info.cookie)) {
+      console.warn(`Incorrect cookie recieved, terminating connection with ${socket_props.address}`);
+      socket_props.socket.close();
       return;
     }
-
-    // Encrypt settings and send
-    let encrypted;
-    try {
-      encrypted = utils.AesEncrypt(Buffer.from(JSON.stringify(this.all_settings_), "utf-8"), this.secret_);
-    } catch (error) {
-      console.warn(`Failed to encrypt message, terminating connection with ${address}. Error: ${error}`);
-      socket.close();
-    }
-    socket.send(this.GenMsg(ServerMsgType.auth1, encrypted).msg);
 
     // Getting here means successful authentication
-    console.log(`Authenticated successfully with ${address}`);
-    this.authenticated_ = true;
-    this.socket_ = socket;
-
-    this.rtt_avg_ = 0;
-    this.rto_interval_ = 0;
-    this.mean_dev_ = 0;
-    this.send_queue_ = [];
-    this.SendWindow();
-    this.events_.emit("ready");
-  }
-
-  /**
-   * SettingsHandler() - Handles settings message
-   * @param settings settings message
-   * @param socket websocket
-   * @param address address of websocket
-   */
-  private SettingsHandler(settings: ClientMsg, socket: WebSocket, address: string) {
-    let new_settings;
-    try {
-      console.log("Setting new settings");
-      new_settings = JSON.parse(utils.AesDecrypt(settings.msg, this.secret_).toString("utf-8"));
-    } catch (error) {
-      console.warn(`Failed to parse new settings, terminating connection with ${address}. Error: ${error}`);
-      socket.close();
-      return;
-    }
-    this.events_.emit("settings", new_settings);
-  }
-
-  private async PwdHandler(pwd: ClientMsg) {
-    console.log("Recieved new password, forwarding to camera");
-    const password = utils.AesDecrypt(pwd.msg, this.secret_).toString("utf-8");
-    this.events.emit("password", password);
+    console.log(`Authenticated successfully with ${socket_props.address}`);
+    socket_props.sockets_wanted = auth1_info.sockets_wanted;
+    socket_props.rtt_avg = 0;
+    socket_props.rto_interval = 0;
+    socket_props.mean_dev = 0;
+    socket_props.send_queue = [];
+    this.sockets_.push(socket_props);
+    this.SendWindow(socket_props);
   }
 
   /**
@@ -246,39 +207,58 @@ export default class ServerSide {
    * @param request information about the request header
    */
   private SocketHandler(socket: WebSocket.WebSocket, request: IncomingMessage) {
-    const address = (request.socket.address() as AddressInfo).address + ":" + (request.socket.address() as AddressInfo).port;
-    console.log(`Opened socket with: ${address}`);
-
-    if (this.authenticated_) {    // Ignore if already authenticated
-      console.log(`Already authenticated with different client, terminating connection with ${address}`);
-      socket.close();
-      return;
-    }
+    const socket_props: SocketProperties = {
+      id: this.next_id_,
+      address: (request.socket.address() as AddressInfo).address + ":" + (request.socket.address() as AddressInfo).port,
+      ack_timeout: undefined,
+      rtt_avg: 0,
+      mean_dev: 0,
+      rto_interval: 0,
+      last_send_window_count: 1,
+      rto_timeout: undefined,
+      connected: true,
+      sockets_wanted: {},
+      send_queue: [],
+      socket: socket,
+      ecdh: crypto.createECDH(CURVE_NAME),
+      keys: undefined,
+      secret: undefined,
+      last_id: 0,
+      inflight: []
+    };
+    this.next_id_++;
+    console.log(`Opened socket with: ${socket_props.address}`);
 
     // Begin ECDH key exchange once connected
-    this.ecdh_ = crypto.createECDH(CURVE_NAME);
-    const keys = this.ecdh_.generateKeys();
-    socket.send(this.GenMsg(ServerMsgType.auth0, keys).msg);
+    socket_props.keys = socket_props.ecdh.generateKeys();
+    socket_props.socket.send(this.GenMsg(ServerMsgType.auth0, socket_props.keys, socket_props).msg);
 
-    socket.on("message", (data, isBinary) => {
+    socket_props.socket.on("message", (data, isBinary) => {
       if (!isBinary) { // Close connection if invalid data recieved
-        console.warn(`Recieved non binary data, terminating connection with ${address}`);
+        console.warn(`Recieved non binary data, terminating connection with ${socket_props.address}`);
         socket.close();
         return;
       }
 
-      this.MessageHandler(data as Buffer, socket, address);
+      this.MessageHandler(data as Buffer, socket_props);
     });
 
-    socket.on("close", (code) => {
-      this.socket_ = undefined;
-      this.authenticated_ = false;
-      console.log(`Connection closed with ${address} with code: ${code}`);
-      socket.removeAllListeners();
+    socket_props.socket.on("close", (code) => {
+      console.log(`Connection closed with ${socket_props.address} with code: ${code}`);
+      socket_props.connected = false;
+      clearTimeout(socket_props.ack_timeout);
+      clearTimeout(socket_props.rto_timeout);
+      socket_props.send_queue = [];
+      socket_props.socket.removeAllListeners();
+      for (let i = 0; i < this.sockets_.length; i++) {
+        if (this.sockets_[i].id == socket_props.id) {
+          this.sockets_.splice(i, 1);
+        }
+      }
     });
 
     socket.on("error", (error) => {
-      console.warn(`Error on connection with ${address}. Error: ${error}`);
+      console.warn(`Error on connection with ${socket_props.address}. Error: ${error}`);
       socket.close();
     });
   }
@@ -286,43 +266,34 @@ export default class ServerSide {
   /**
    * MessageHandler() - Handles socket messages
    * @param msg message buffer
-   * @param socket websocket
-   * @param address address of websocket
+   * @param socket_props websocket properties
    */
-  private MessageHandler(msg: Buffer, socket: WebSocket, address: string) {
+  private MessageHandler(msg: Buffer, socket_props: SocketProperties) {
     let client_msg;
     try {
       client_msg = utils.ParseClientMsgType(msg);
     } catch (error) {
-      console.warn(`Error while parsing message, terminating connection with ${address}. Error: ${error}`);
-      this.socket_.terminate();
+      console.warn(`Error while parsing message, terminating connection with ${socket_props.address}. Error: ${error}`);
+      socket_props.socket.close();
       return;
     }
 
     switch (client_msg.type) {
       case (ClientMsgType.ack): {
-        this.AckHandler(client_msg);
+        this.AckHandler(client_msg, socket_props);
         break;
       }
       case (ClientMsgType.auth0): {
-        this.Auth0Handler(client_msg, socket, address);
+        this.Auth0Handler(client_msg, socket_props);
         break;
       }
       case (ClientMsgType.auth1): {
-        this.Auth1Handler(client_msg, socket, address);
-        break;
-      }
-      case (ClientMsgType.settings): {
-        this.SettingsHandler(client_msg, socket, address);
-        break;
-      }
-      case (ClientMsgType.pwd): {
-        this.PwdHandler(client_msg);
+        this.Auth1Handler(client_msg, socket_props);
         break;
       }
       default: {
-        console.warn(`Recieved type: ${client_msg.type} message before authentication, terminating connection with ${address}`);
-        socket.terminate();
+        console.warn(`Recieved type: ${client_msg.type} message before authentication, terminating connection with ${socket_props.address}`);
+        socket_props.socket.close();
       }
     }
     return;
@@ -331,44 +302,46 @@ export default class ServerSide {
 
   /**
    * HalveQueue() - Removes half of the frames in send queue
+   * @param socket_props websocket properties
    */
-  private HalveQueue() {
+  private HalveQueue(socket_props: SocketProperties) {
     const new_queue: Array<Buffer> = [];
 
-    for (let i = 0; i < this.send_queue_.length; i++) {
+    for (let i = 0; i < socket_props.send_queue.length; i++) {
       if (i % 2 == 0) {
-        new_queue.push(this.send_queue_.splice(i, 1)[0]);
+        new_queue.push(socket_props.send_queue.splice(i, 1)[0]);
       }
       else {
-        this.send_queue_.splice(i, 1);
+        socket_props.send_queue.splice(i, 1);
       }
     }
-    this.send_queue_ = new_queue;
+    socket_props.send_queue = new_queue;
   }
 
   /**
    * SendWindow() - Send this.send of frames from queue
+   * @param socket_props websocket properties
    * @param number number of frames to send
    */
-  private SendWindow(number?: number) {
-    if (!this.socket_) return;
+  private SendWindow(socket_props: SocketProperties, number?: number) {
+    if (!socket_props.connected) return;
     if (!number || number < 1) number = 1;
-    this.last_send_window_count_ = number;
-    clearInterval(this.rto_timeout_);
+    socket_props.last_send_window_count = number;
+    clearInterval(socket_props.rto_timeout);
 
-    for (let i = 0; i < number && this.send_queue_.length > 0; i++) {
+    for (let i = 0; i < number && socket_props.send_queue.length > 0; i++) {
       try {
-        const message = this.GenMsg(ServerMsgType.frame, this.send_queue_.shift());
-        this.Send(this.socket_, message);
+        const message = this.GenMsg(ServerMsgType.frame, socket_props.send_queue.shift(), socket_props);
+        this.Send(socket_props, message);
       } catch (error) {
         console.warn(`Error while encrypting frame to send, terminating connection. Error: ${error}`);
-        this.socket_.terminate();
+        socket_props.socket.close();
       }
     }
 
-    this.rto_timeout_ = setTimeout(() => {
-      this.SendWindow(Math.round(this.last_send_window_count_ / 2));
-    }, this.rto_interval_);
+    socket_props.rto_timeout = setTimeout(() => {
+      this.SendWindow(socket_props, Math.round(socket_props.last_send_window_count / 2));
+    }, socket_props.rto_interval);
   }
 
   /**
@@ -376,18 +349,17 @@ export default class ServerSide {
    * Format: <Message type [UInt8] | MessageId [UInt32BE] | Timestamp [UInt64BE] | Content...>
    * @param type type of message to send
    * @param content content of message
+   * @param socket_props websocket properties
    * @returns object { msg: Buffer, id: number };
    */
-  private GenMsg(type: ServerMsgType, content: Buffer): ServerMsg {
-    this.last_id_ = (this.last_id_ + 1) / (1 << 32);      // Roll over to 0 if id is over UInt32 size
+  private GenMsg(type: ServerMsgType, content: Buffer, socket_props: SocketProperties): ServerMsg {
+    socket_props.last_id = (socket_props.last_id + 1) / (1 << 32);      // Roll over to 0 if id is over UInt32 size
     const timestamp = Date.now();
-    const header = Buffer.alloc(1 + 4 + 8);
+    const header = Buffer.alloc(1);
     header.writeUint8(type, 0);
-    header.writeUint32BE(this.last_id_, 1);
-    header.writeBigUInt64BE(BigInt(timestamp), 5);
 
     return {
-      id: this.last_id_,
+      id: socket_props.last_id,
       timestamp,
       type: type,
       msg: Buffer.concat([header, content])
@@ -396,12 +368,13 @@ export default class ServerSide {
 
   /**
    * Send() - Send a message
+   * @param socket_props websocket properties
    * @param message message to send
    */
-  private Send(socket: WebSocket, message: ServerMsg) {
-    this.inflight_.push({ id: message.id, timestamp: message.timestamp });
+  private Send(socket_props: SocketProperties, message: ServerMsg) {
+    socket_props.inflight.push(message.timestamp);
     try {
-      socket.send(message.msg);
+      socket_props.socket.send(message.msg);
     } catch { /* */ }
   }
 }

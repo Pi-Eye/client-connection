@@ -1,18 +1,14 @@
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const Buffer = require("buffer/").Buffer;  // note: the trailing slash is important!
 import crypto from "crypto";
 
-import { ClientMsgType, ServerMsgType } from "./enums";
-import { ClientParsedMsg, ServerParsedMsg } from "./types";
+import { ClientMsgType } from "./enums";
+import { ClientParsedMsg } from "./types";
 
 const KEY_ALGORITHM = "aes-128-gcm";
 export const KEY_LENGTH = 16;
 const IV_LENGTH = 16;
 const AUTH_TAG_LENGTH = 16;
 
-const ID_OFFSET = 1;
-const TIMESTAMP_OFFSET = 5;
-const MSG_OFFSET = 13;
+const MSG_OFFSET = 1;
 
 /**
  * ParseClientMsgType() - Parses the type of incoming client message
@@ -20,97 +16,29 @@ const MSG_OFFSET = 13;
  * @returns type of message
  */
 export function ParseClientMsgType(msg: Buffer): ClientParsedMsg {
-  const id = msg.readUInt32BE(ID_OFFSET);
   switch (msg.readUint8(0)) {
     case (ClientMsgType.ack): {
       return {
-        id,
-        timestamp: 0,
         type: ClientMsgType.ack,
         msg: msg.subarray(MSG_OFFSET)
       };
     }
     case (ClientMsgType.auth0): {
       return {
-        id,
-        timestamp: Number(msg.readBigInt64BE(TIMESTAMP_OFFSET)),
         type: ClientMsgType.auth0,
         msg: msg.subarray(MSG_OFFSET)
       };
     }
     case (ClientMsgType.auth1): {
       return {
-        id,
-        timestamp: Number(msg.readBigInt64BE(TIMESTAMP_OFFSET)),
         type: ClientMsgType.auth1,
         msg: msg.subarray(MSG_OFFSET)
       };
     }
-    case (ClientMsgType.settings): {
-      return {
-        id,
-        timestamp: Number(msg.readBigInt64BE(TIMESTAMP_OFFSET)),
-        type: ClientMsgType.settings,
-        msg: msg.subarray(MSG_OFFSET)
-      };
-    }
-    case (ClientMsgType.pwd): {
-      return {
-        id,
-        timestamp: Number(msg.readBigInt64BE(TIMESTAMP_OFFSET)),
-        type: ClientMsgType.pwd,
-        msg: msg.subarray(MSG_OFFSET)
-      };
-    }
     default: {
       return {
-        id,
-        timestamp: 0,
         type: ClientMsgType.unknown,
         msg: msg.subarray(MSG_OFFSET)
-      };
-    }
-  }
-}
-
-/**
- * ParseServerMsgType() - Parses the type of incoming server message
- * @param m message to parse type from
- * @returns type of message
- */
-export function ParseServerMsgType(m: ArrayBuffer): ServerParsedMsg {
-  const msg: Buffer = Buffer.from(m, 0, 1 + 4 + 8);
-  const id = msg.readUInt32BE(ID_OFFSET);
-  switch (msg.readUint8(0)) {
-    case (ServerMsgType.auth0): {
-      return {
-        id,
-        timestamp: Number(msg.readBigInt64BE(TIMESTAMP_OFFSET)),
-        type: ServerMsgType.auth0,
-        msg: new Uint8Array(m, 1 + 4 + 8)
-      };
-    } case (ServerMsgType.auth1): {
-      return {
-        id,
-        timestamp: Number(msg.readBigInt64BE(TIMESTAMP_OFFSET)),
-        type: ServerMsgType.auth1,
-        msg: new Uint8Array(m, 1 + 4 + 8)
-      };
-    }
-    case (ServerMsgType.frame): {
-      return {
-        id,
-        timestamp: Number(msg.readBigInt64BE(TIMESTAMP_OFFSET)),
-        type: ServerMsgType.frame,
-        msg: new Uint8Array(m, 1 + 4 + 8)
-      };
-    }
-    default: {
-      return {
-        id,
-        timestamp: 0,
-        type: ServerMsgType.unknown,
-        msg: new Uint8Array(m, 1 + 4 + 8)
       };
     }
   }
@@ -120,7 +48,7 @@ export function ParseServerMsgType(m: ArrayBuffer): ServerParsedMsg {
  * AesEncrypt() - Decrypts aes encrypted data
  * @param data buffer of data to encrypt
  * @param key buffer of key to decrypt data
- * @returns encrypted buffer in format: <Initialization Vector [16 Bytes] | Authentication Tag [16 Bytes] | aes-128-gcm Encrypted Data...>
+ * @returns encrypted buffer in format: <Initialization Vector [16 Bytes] | aes-128-gcm Encrypted Data... | Authentication Tag [16 Bytes]>
  */
 export function AesEncrypt(data: Buffer, key: Buffer): Buffer {
   const iv = crypto.randomBytes(IV_LENGTH);
@@ -130,16 +58,16 @@ export function AesEncrypt(data: Buffer, key: Buffer): Buffer {
   encrypted = Buffer.concat([encrypted, cipher.final()]);
   const authTag = cipher.getAuthTag();
 
-  return Buffer.concat([iv, authTag, encrypted]);
+  return Buffer.concat([iv, encrypted, authTag]);
 }
 
 /**
  * AesDecrypt() - Decrypts aes encrypted data
- * @param encrypted encrypted buffer in format: <Initialization Vector [16 Bytes] | Authentication Tag [16 Bytes] | aes-128-gcm Encrypted Data...>
+ * @param encrypted encrypted buffer in format: <Initialization Vector [16 Bytes] | aes-128-gcm Encrypted Data... | Authentication Tag [16 Bytes] >
  * @param key buffer of key to decrypt data
  * @returns buffer of unencrypted data
  */
-export function AesDecrypt(encrypted: Uint8Array, key: Buffer): Buffer {
+export function AesDecrypt(encrypted: Buffer, key: Buffer): Buffer {
   const iv = encrypted.subarray(0, IV_LENGTH);
   const authTag = encrypted.subarray(IV_LENGTH, IV_LENGTH + AUTH_TAG_LENGTH);
   const data = encrypted.subarray(IV_LENGTH + AUTH_TAG_LENGTH, encrypted.length);

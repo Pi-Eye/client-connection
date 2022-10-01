@@ -1,33 +1,19 @@
 /// <reference types="node" />
-import { AllSettings } from "camera-interface";
-import TypedEventEmitter from "typed-emitter";
-import { ServerSideEvents } from "./types";
 export default class ServerSide {
-    private events_;
-    get events(): TypedEventEmitter<ServerSideEvents>;
-    private ack_timeout_;
     private server_;
-    private socket_;
-    private all_settings_;
-    private ecdh_;
-    private secret_;
+    private sockets_;
+    private next_id_;
     private auth_function_;
-    private authenticated_;
-    private last_id_;
-    private inflight_;
-    private send_queue_;
-    private rtt_avg_;
-    private mean_dev_;
-    private rto_interval_;
-    private last_send_window_count_;
-    private rto_timeout_;
     private port_;
-    constructor(port: number, all_settings: AllSettings, auth_function: (cookie: string) => boolean);
+    constructor(port: number, auth_function: (cookie: string) => boolean);
     /**
      * QueueFrame() - Queues up a frame to be sent
      * @param frame frame to queue
+     * @param timestamp timestamp of frame
+     * @param motion motion on frame or not
+     * @param address address of camera
      */
-    QueueFrame(frame: Buffer, timestamp: number, motion: boolean): void;
+    QueueFrame(frame: Buffer, timestamp: number, motion: boolean, address: string): void;
     /**
      * Stop() - Fully stops websocket server
      */
@@ -44,25 +30,15 @@ export default class ServerSide {
     /**
      * Auth0Handler() - Handles responding to auth0 message
      * @param auth0 auth0 message
-     * @param socket websocket
-     * @param address address of websocket
+     * @param socket_props websocket properties
      */
     private Auth0Handler;
     /**
      * Auth1Handler() - Handles responding to auth1 message
      * @param auth1 auth1 message
-     * @param socket websocket
-     * @param address address of websocket
+     * @param socket_props websocket properties
      */
     private Auth1Handler;
-    /**
-     * SettingsHandler() - Handles settings message
-     * @param settings settings message
-     * @param socket websocket
-     * @param address address of websocket
-     */
-    private SettingsHandler;
-    private PwdHandler;
     /**
      * SocketHandler() - Handles authenticating connection, then recieving messages on connection
      * @param socket socket to authenticate
@@ -72,16 +48,17 @@ export default class ServerSide {
     /**
      * MessageHandler() - Handles socket messages
      * @param msg message buffer
-     * @param socket websocket
-     * @param address address of websocket
+     * @param socket_props websocket properties
      */
     private MessageHandler;
     /**
      * HalveQueue() - Removes half of the frames in send queue
+     * @param socket_props websocket properties
      */
     private HalveQueue;
     /**
      * SendWindow() - Send this.send of frames from queue
+     * @param socket_props websocket properties
      * @param number number of frames to send
      */
     private SendWindow;
@@ -90,11 +67,13 @@ export default class ServerSide {
      * Format: <Message type [UInt8] | MessageId [UInt32BE] | Timestamp [UInt64BE] | Content...>
      * @param type type of message to send
      * @param content content of message
+     * @param socket_props websocket properties
      * @returns object { msg: Buffer, id: number };
      */
     private GenMsg;
     /**
      * Send() - Send a message
+     * @param socket_props websocket properties
      * @param message message to send
      */
     private Send;
