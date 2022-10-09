@@ -44,11 +44,11 @@ export default class ServerSide {
 
   private next_id_ = 0;
 
-  private auth_function_: (cookie: string) => boolean;
+  private auth_function_: (cookie: string) => Promise<boolean>;
 
   private port_: number;
 
-  constructor(port: number, auth_function: (cookie: string) => boolean) {
+  constructor(port: number, auth_function: (cookie: string) => Promise<boolean>) {
     this.port_ = port; this.CreateServer();
     this.auth_function_ = auth_function;
   }
@@ -176,7 +176,7 @@ export default class ServerSide {
     utils.AesDecrypt(auth1.msg, socket_props.secret);
     try {
       auth1_info = JSON.parse(utils.AesDecrypt(auth1.msg, socket_props.secret).toString("utf-8"));
-      
+
     } catch (error) {
       console.warn(`Failed to decrypt cookie, terminating connection with ${socket_props.address}. Error: ${error}`);
       socket_props.socket.close();
@@ -184,7 +184,7 @@ export default class ServerSide {
     }
 
     // Verify 
-    if (!this.auth_function_(auth1_info.cookie)) {
+    if (!(await this.auth_function_(auth1_info.cookie))) {
       console.warn(`Incorrect cookie recieved, terminating connection with ${socket_props.address}`);
       socket_props.socket.close();
       return;
