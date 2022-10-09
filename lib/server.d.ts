@@ -5,7 +5,7 @@ export default class ServerSide {
     private next_id_;
     private auth_function_;
     private port_;
-    constructor(port: number, auth_function: (cookie: string) => boolean);
+    constructor(port: number, auth_function: (cookie: string) => Promise<boolean>);
     /**
      * QueueFrame() - Queues up a frame to be sent
      * @param frame frame to queue
