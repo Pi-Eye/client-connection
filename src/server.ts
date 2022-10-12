@@ -93,8 +93,12 @@ export default class ServerSide {
    * Stop() - Fully stops websocket server
    */
   Stop() {
-    this.server_.clients.forEach((socket) => { socket.close(); });
-    this.server_.close();
+    try {
+      this.server_.clients.forEach((socket) => { socket.close(); });
+      this.server_.close();
+    } catch (error) {
+      console.warn(error);
+    }
   }
 
   /**
