@@ -1,4 +1,3 @@
-import fs from "fs";
 import https from "https";
 import WebSocket, { AddressInfo } from "ws";
 import crypto from "crypto";
@@ -50,23 +49,12 @@ export default class ServerSide {
   private auth_function_: (cookie: string) => Promise<boolean>;
 
   private port_: number;
-  private cert_path_: string;
-  private key_path_: string;
 
-  constructor(port: number, cert_path: string, key_path: string, auth_function: (cookie: string) => Promise<boolean>) {
-    this.cert_path_ = cert_path;
-    this.key_path_ = key_path;
+  constructor(port: number, https_server: https.Server, auth_function: (cookie: string) => Promise<boolean>) {
+    this.https_ = https_server;
     this.port_ = port;
     this.auth_function_ = auth_function;
-
-    this.https_ = https.createServer({
-      cert: fs.readFileSync(this.cert_path_),
-      key: fs.readFileSync(this.key_path_)
-    });
-
     this.CreateServer();
-    this.https_.listen(this.port_);
-
   }
 
   /**
