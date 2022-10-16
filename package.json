@@ -22,14 +22,15 @@
   },
   "homepage": "https://github.com/Pi-Eye/client-connection-server#readme",
   "devDependencies": {
+    "@types/ws": "^8.5.3",
     "@typescript-eslint/eslint-plugin": "^5.42.0",
     "eslint": "^8.27.0"
   },
   "dependencies": {
     "@types/node": "^18.11.9",
-    "@types/ws": "^8.5.3",
     "argon2": "^0.30.2",
     "camera-interface": "github:Pi-Eye/camera-interface",
+    "https": "^1.0.0",
     "node-stream-processor-types": "github:Pi-Eye/node-stream-processor-types",
     "typescript": "^4.8.4",
     "ws": "^8.11.0"

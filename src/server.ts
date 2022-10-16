@@ -1,3 +1,5 @@
+import fs from "fs";
+import https from "https";
 import WebSocket, { AddressInfo } from "ws";
 import crypto from "crypto";
 import { IncomingMessage } from "http";
@@ -39,6 +41,7 @@ type SocketProperties = {
 };
 
 export default class ServerSide {
+  private https_: https.Server;
   private server_: WebSocket.Server;
   private sockets_: Array<SocketProperties> = [];
 
@@ -47,10 +50,23 @@ export default class ServerSide {
   private auth_function_: (cookie: string) => Promise<boolean>;
 
   private port_: number;
+  private cert_path_: string;
+  private key_path_: string;
 
-  constructor(port: number, auth_function: (cookie: string) => Promise<boolean>) {
-    this.port_ = port; this.CreateServer();
+  constructor(port: number, cert_path: string, key_path: string, auth_function: (cookie: string) => Promise<boolean>) {
+    this.cert_path_ = cert_path;
+    this.key_path_ = key_path;
+    this.port_ = port;
     this.auth_function_ = auth_function;
+
+    this.https_ = https.createServer({
+      cert: fs.readFileSync(this.cert_path_),
+      key: fs.readFileSync(this.key_path_)
+    });
+
+    this.CreateServer();
+    this.https_.listen(this.port_);
+
   }
 
   /**
@@ -105,7 +121,9 @@ export default class ServerSide {
    * CreateServer() - Creates websocket server
    */
   private CreateServer() {
-    this.server_ = new WebSocket.Server({ port: this.port_ });
+
+
+    this.server_ = new WebSocket.Server({ server: this.https_ });
 
     this.server_.on("connection", (socket, request) => {
       this.SocketHandler(socket, request);
@@ -127,6 +145,7 @@ export default class ServerSide {
       console.log("Server that was listening closed");
       this.server_.removeAllListeners();
     });
+
   }
 
   /**
