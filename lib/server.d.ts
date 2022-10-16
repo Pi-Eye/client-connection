@@ -1,14 +1,13 @@
 /// <reference types="node" />
+/// <reference types="node" />
+import https from "https";
 export default class ServerSide {
     private https_;
     private server_;
     private sockets_;
     private next_id_;
     private auth_function_;
-    private port_;
-    private cert_path_;
-    private key_path_;
-    constructor(port: number, cert_path: string, key_path: string, auth_function: (cookie: string) => Promise<boolean>);
+    constructor(https_server: https.Server, auth_function: (cookie: string) => Promise<boolean>);
     /**
      * QueueFrame() - Queues up a frame to be sent
      * @param frame frame to queue

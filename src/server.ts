@@ -48,11 +48,8 @@ export default class ServerSide {
 
   private auth_function_: (cookie: string) => Promise<boolean>;
 
-  private port_: number;
-
-  constructor(port: number, https_server: https.Server, auth_function: (cookie: string) => Promise<boolean>) {
+  constructor(https_server: https.Server, auth_function: (cookie: string) => Promise<boolean>) {
     this.https_ = https_server;
-    this.port_ = port;
     this.auth_function_ = auth_function;
     this.CreateServer();
   }
