@@ -1,3 +1,4 @@
+import http from "http";
 import https from "https";
 import WebSocket, { AddressInfo } from "ws";
 import crypto from "crypto";
@@ -40,7 +41,7 @@ type SocketProperties = {
 };
 
 export default class ServerSide {
-  private https_: https.Server;
+  private https_: https.Server | http.Server;
   private server_: WebSocket.Server;
   private sockets_: Array<SocketProperties> = [];
 
@@ -48,7 +49,7 @@ export default class ServerSide {
 
   private auth_function_: (cookie: string) => Promise<boolean>;
 
-  constructor(https_server: https.Server, auth_function: (cookie: string) => Promise<boolean>) {
+  constructor(https_server: https.Server | http.Server, auth_function: (cookie: string) => Promise<boolean>) {
     this.https_ = https_server;
     this.auth_function_ = auth_function;
     this.CreateServer();
